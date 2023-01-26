@@ -28,6 +28,7 @@ jobs:
         with:
           go-version: ${{ matrix.go_version }}
           cache: true
+          cache-dependency-path: awslambda/go.sum
       - run: go mod download
       - name: test
         run: go test -v -race -coverprofile=cover.out $TEST_TARGET
