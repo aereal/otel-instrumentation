@@ -110,10 +110,14 @@ func TestStartTraceFromSQSEvent(t *testing.T) {
 
 	testCases := []struct {
 		queueName string
+		ev        events.SQSEvent
 		wantSpans tracetest.SpanStubs
 	}{
 		{
 			queueName: "test-queue-1",
+			ev: events.SQSEvent{
+				Records: []events.SQSMessage{{}},
+			},
 			wantSpans: tracetest.SpanStubs{
 				{
 					Name:     "test-queue-1 process",
@@ -124,12 +128,16 @@ func TestStartTraceFromSQSEvent(t *testing.T) {
 						attribute.String("faas.trigger", "pubsub"),
 						attribute.String("messaging.source.kind", "queue"),
 						attribute.String("messaging.source.name", "test-queue-1"),
+						attribute.Int("messaging.batch.message_count", 1),
 					},
 				},
 			},
 		},
 		{
 			queueName: "test-queue-2",
+			ev: events.SQSEvent{
+				Records: []events.SQSMessage{{}, {}},
+			},
 			wantSpans: tracetest.SpanStubs{
 				{
 					Name:     "test-queue-2 process",
@@ -140,6 +148,7 @@ func TestStartTraceFromSQSEvent(t *testing.T) {
 						attribute.String("faas.trigger", "pubsub"),
 						attribute.String("messaging.source.kind", "queue"),
 						attribute.String("messaging.source.name", "test-queue-2"),
+						attribute.Int("messaging.batch.message_count", 2),
 					},
 				},
 			},
@@ -149,7 +158,7 @@ func TestStartTraceFromSQSEvent(t *testing.T) {
 		t.Run(tc.queueName, func(t *testing.T) {
 			exporter := tracetest.NewInMemoryExporter()
 			tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exporter))
-			_, span := awslambda.StartTraceFromSQSEvent(ctx, tp.Tracer("test"), tc.queueName)
+			_, span := awslambda.StartTraceFromSQSEvent(ctx, tp.Tracer("test"), tc.queueName, tc.ev)
 			span.End()
 			if err := tp.ForceFlush(ctx); err != nil {
 				t.Fatal(err)

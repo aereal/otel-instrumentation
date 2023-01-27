@@ -19,8 +19,9 @@ var (
 		semconv.FaaSTriggerPubsub,
 		attribute.String("messaging.source.kind", "queue"),
 	}
-	messagingSourceNameKey = attribute.Key("messaging.source.name")
-	messagingMessageIDKey  = attribute.Key("messaging.message.id")
+	messagingSourceNameKey        = attribute.Key("messaging.source.name")
+	messagingMessageIDKey         = attribute.Key("messaging.message.id")
+	messagingBatchMessageCountKey = attribute.Key("messaging.batch.message_count")
 )
 
 const (
@@ -33,9 +34,9 @@ const (
 // It conforms to [SQS Event convention].
 //
 // [SQS Event convention]: https://opentelemetry.io/docs/reference/specification/trace/semantic_conventions/instrumentation/aws-lambda/#sqs-event
-func StartTraceFromSQSEvent(ctx context.Context, tracer trace.Tracer, queueName string) (context.Context, trace.Span) {
+func StartTraceFromSQSEvent(ctx context.Context, tracer trace.Tracer, queueName string, ev events.SQSEvent) (context.Context, trace.Span) {
 	attrs := commonAttrs[:]
-	attrs = append(attrs, messagingSourceNameKey.String(queueName))
+	attrs = append(attrs, messagingSourceNameKey.String(queueName), messagingBatchMessageCountKey.Int(len(ev.Records)))
 	opts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindConsumer),
 		trace.WithAttributes(attrs...),
