@@ -110,34 +110,61 @@ func TestStartTraceFromSQSEvent(t *testing.T) {
 
 	testCases := []struct {
 		queueName string
+		ev        events.SQSEvent
+		wantSpans tracetest.SpanStubs
 	}{
-		{queueName: "test-queue-1"},
-		{queueName: "test-queue-2"},
-	}
-	for _, tc := range testCases {
-		t.Run(tc.queueName, func(t *testing.T) {
-			exporter := tracetest.NewInMemoryExporter()
-			tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exporter))
-			_, span := awslambda.StartTraceFromSQSEvent(ctx, tp.Tracer("test"), tc.queueName)
-			span.End()
-			if err := tp.ForceFlush(ctx); err != nil {
-				t.Fatal(err)
-			}
-			gotSpans := exporter.GetSpans()
-			wantSpans := tracetest.SpanStubs{
+		{
+			queueName: "test-queue-1",
+			ev: events.SQSEvent{
+				Records: []events.SQSMessage{{}},
+			},
+			wantSpans: tracetest.SpanStubs{
 				{
-					Name:     fmt.Sprintf("%s process", tc.queueName),
+					Name:     "test-queue-1 process",
 					SpanKind: trace.SpanKindConsumer,
 					Attributes: []attribute.KeyValue{
 						attribute.String("messaging.system", "AmazonSQS"),
 						attribute.String("messaging.operation", "process"),
 						attribute.String("faas.trigger", "pubsub"),
 						attribute.String("messaging.source.kind", "queue"),
-						attribute.String("messaging.source.name", tc.queueName),
+						attribute.String("messaging.source.name", "test-queue-1"),
+						attribute.Int("messaging.batch.message_count", 1),
 					},
 				},
+			},
+		},
+		{
+			queueName: "test-queue-2",
+			ev: events.SQSEvent{
+				Records: []events.SQSMessage{{}, {}},
+			},
+			wantSpans: tracetest.SpanStubs{
+				{
+					Name:     "test-queue-2 process",
+					SpanKind: trace.SpanKindConsumer,
+					Attributes: []attribute.KeyValue{
+						attribute.String("messaging.system", "AmazonSQS"),
+						attribute.String("messaging.operation", "process"),
+						attribute.String("faas.trigger", "pubsub"),
+						attribute.String("messaging.source.kind", "queue"),
+						attribute.String("messaging.source.name", "test-queue-2"),
+						attribute.Int("messaging.batch.message_count", 2),
+					},
+				},
+			},
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.queueName, func(t *testing.T) {
+			exporter := tracetest.NewInMemoryExporter()
+			tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exporter))
+			_, span := awslambda.StartTraceFromSQSEvent(ctx, tp.Tracer("test"), tc.queueName, tc.ev)
+			span.End()
+			if err := tp.ForceFlush(ctx); err != nil {
+				t.Fatal(err)
 			}
-			if diff := cmpSpans(wantSpans, gotSpans); diff != "" {
+			gotSpans := exporter.GetSpans()
+			if diff := cmpSpans(tc.wantSpans, gotSpans); diff != "" {
 				t.Errorf("-want, +got:\n%s", diff)
 			}
 		})
