@@ -110,9 +110,40 @@ func TestStartTraceFromSQSEvent(t *testing.T) {
 
 	testCases := []struct {
 		queueName string
+		wantSpans tracetest.SpanStubs
 	}{
-		{queueName: "test-queue-1"},
-		{queueName: "test-queue-2"},
+		{
+			queueName: "test-queue-1",
+			wantSpans: tracetest.SpanStubs{
+				{
+					Name:     "test-queue-1 process",
+					SpanKind: trace.SpanKindConsumer,
+					Attributes: []attribute.KeyValue{
+						attribute.String("messaging.system", "AmazonSQS"),
+						attribute.String("messaging.operation", "process"),
+						attribute.String("faas.trigger", "pubsub"),
+						attribute.String("messaging.source.kind", "queue"),
+						attribute.String("messaging.source.name", "test-queue-1"),
+					},
+				},
+			},
+		},
+		{
+			queueName: "test-queue-2",
+			wantSpans: tracetest.SpanStubs{
+				{
+					Name:     "test-queue-2 process",
+					SpanKind: trace.SpanKindConsumer,
+					Attributes: []attribute.KeyValue{
+						attribute.String("messaging.system", "AmazonSQS"),
+						attribute.String("messaging.operation", "process"),
+						attribute.String("faas.trigger", "pubsub"),
+						attribute.String("messaging.source.kind", "queue"),
+						attribute.String("messaging.source.name", "test-queue-2"),
+					},
+				},
+			},
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.queueName, func(t *testing.T) {
@@ -124,20 +155,7 @@ func TestStartTraceFromSQSEvent(t *testing.T) {
 				t.Fatal(err)
 			}
 			gotSpans := exporter.GetSpans()
-			wantSpans := tracetest.SpanStubs{
-				{
-					Name:     fmt.Sprintf("%s process", tc.queueName),
-					SpanKind: trace.SpanKindConsumer,
-					Attributes: []attribute.KeyValue{
-						attribute.String("messaging.system", "AmazonSQS"),
-						attribute.String("messaging.operation", "process"),
-						attribute.String("faas.trigger", "pubsub"),
-						attribute.String("messaging.source.kind", "queue"),
-						attribute.String("messaging.source.name", tc.queueName),
-					},
-				},
-			}
-			if diff := cmpSpans(wantSpans, gotSpans); diff != "" {
+			if diff := cmpSpans(tc.wantSpans, gotSpans); diff != "" {
 				t.Errorf("-want, +got:\n%s", diff)
 			}
 		})
