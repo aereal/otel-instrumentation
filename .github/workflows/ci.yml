@@ -10,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3.3.0
       - name: lint
-        uses: reviewdog/action-golangci-lint@v2.2.2
+        uses: reviewdog/action-golangci-lint@v2.6.2
   test:
     env:
       TEST_TARGET: ./awslambda ./github.com/graph-gophers/dataloader/oteldataloader
