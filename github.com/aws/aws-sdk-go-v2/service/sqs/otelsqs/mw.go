@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -40,12 +41,17 @@ var (
 
 type config struct {
 	tracerProvider trace.TracerProvider
+	propagator     propagation.TextMapPropagator
 }
 
 type Option func(*config)
 
 func WithTracerProvider(tp trace.TracerProvider) Option {
 	return func(c *config) { c.tracerProvider = tp }
+}
+
+func WithPropagator(prop propagation.TextMapPropagator) Option {
+	return func(c *config) { c.propagator = prop }
 }
 
 func AppendMiddlewares(apiOptions *[]func(*mw.Stack) error, opts ...Option) {
@@ -56,8 +62,12 @@ func AppendMiddlewares(apiOptions *[]func(*mw.Stack) error, opts ...Option) {
 	if cfg.tracerProvider == nil {
 		cfg.tracerProvider = otel.GetTracerProvider()
 	}
+	if cfg.propagator == nil {
+		cfg.propagator = otel.GetTextMapPropagator()
+	}
 	r := &root{
-		tracer: cfg.tracerProvider.Tracer(scope),
+		tracer:     cfg.tracerProvider.Tracer(scope),
+		propagator: cfg.propagator,
 	}
 	*apiOptions = append(*apiOptions, r.initializeBefore, r.initializeAfter)
 }
@@ -65,7 +75,8 @@ func AppendMiddlewares(apiOptions *[]func(*mw.Stack) error, opts ...Option) {
 type spanTimestampKey struct{}
 
 type root struct {
-	tracer trace.Tracer
+	tracer     trace.Tracer
+	propagator propagation.TextMapPropagator
 }
 
 func (r *root) initializeBefore(stack *mw.Stack) error {
@@ -100,6 +111,9 @@ func (r *root) initializeAfter(stack *mw.Stack) error {
 			ctx, span = r.tracer.Start(ctx, fmt.Sprintf("publish %s", queueName),
 				trace.WithSpanKind(trace.SpanKindProducer),
 				trace.WithAttributes(attrs...))
+			carrier := &SQSSystemAttributesCarrier{Attributes: params.MessageSystemAttributes}
+			r.propagator.Inject(ctx, carrier)
+			params.MessageSystemAttributes = carrier.Attributes
 		case *sqs.SendMessageBatchInput:
 			attrs := make([]attribute.KeyValue, 0, 6)
 			attrs = append(attrs,
@@ -116,10 +130,10 @@ func (r *root) initializeAfter(stack *mw.Stack) error {
 			ctx, span = r.tracer.Start(ctx, fmt.Sprintf("publish %s", queueName),
 				trace.WithSpanKind(trace.SpanKindClient),
 				trace.WithAttributes(attrs...))
-			for _, entry := range params.Entries {
+			for i, entry := range params.Entries {
 				entry := entry
 				batchID := *entry.Id
-				_, createSpan := r.tracer.Start(ctx, fmt.Sprintf("create %s", queueName),
+				createCtx, createSpan := r.tracer.Start(ctx, fmt.Sprintf("create %s", queueName),
 					trace.WithAttributes(
 						semconv.MessagingSystemAWSSqs,
 						semconv.MessagingOperationTypeCreate,
@@ -129,6 +143,9 @@ func (r *root) initializeAfter(stack *mw.Stack) error {
 					),
 					trace.WithTimestamp(ts),
 					trace.WithSpanKind(trace.SpanKindProducer))
+				carrier := &SQSSystemAttributesCarrier{Attributes: entry.MessageSystemAttributes}
+				r.propagator.Inject(createCtx, carrier)
+				params.Entries[i].MessageSystemAttributes = carrier.Attributes
 				createSpanByRequestID[batchID] = createSpan
 				defer createSpan.End()
 			}

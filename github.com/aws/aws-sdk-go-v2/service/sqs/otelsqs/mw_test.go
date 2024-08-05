@@ -16,13 +16,15 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 )
 
 var (
-	queueURL = "http://aws.test/123456789012/my-queue"
+	queueURL     = "http://aws.test/123456789012/my-queue"
+	emptyTraceID trace.TraceID
 )
 
 func TestMiddleware_SendMessage(t *testing.T) {
@@ -77,7 +79,17 @@ func TestMiddleware_SendMessage(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			propagator := propagation.TraceContext{}
+			var traceID string
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				defer r.Body.Close()
+				input := new(sqs.SendMessageInput)
+				if err := json.NewDecoder(r.Body).Decode(input); err != nil {
+					t.Errorf("failed to decode request body: %+v", err)
+				}
+				carrier := &otelsqs.SQSSystemAttributesCarrier{Attributes: input.MessageSystemAttributes}
+				sc := trace.SpanContextFromContext(propagator.Extract(context.Background(), carrier))
+				traceID = sc.TraceID().String()
 				w.Header().Set("content-type", "application/json")
 				_ = json.NewEncoder(w).Encode(tc.output)
 			}))
@@ -87,9 +99,12 @@ func TestMiddleware_SendMessage(t *testing.T) {
 			tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exporter))
 			var opts sqs.Options
 			opts.BaseEndpoint = &srv.URL
-			otelsqs.AppendMiddlewares(&opts.APIOptions, otelsqs.WithTracerProvider(tp))
+			otelsqs.AppendMiddlewares(&opts.APIOptions, otelsqs.WithTracerProvider(tp), otelsqs.WithPropagator(propagator))
 			client := sqs.New(opts)
 			ctx, span := tp.Tracer("test").Start(ctx, "SendMessage")
+			if traceID == emptyTraceID.String() {
+				t.Errorf("expected trace ID injected but got nothing")
+			}
 			_, err := client.SendMessage(ctx, tc.input)
 			if err != nil {
 				t.Fatalf("SendMessage: %+v", err)
@@ -270,7 +285,21 @@ func TestMiddleware_SendMessageBatch(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			propagator := propagation.TraceContext{}
+			traceIDs := make([]trace.TraceID, 0)
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				defer r.Body.Close()
+				input := new(sqs.SendMessageBatchInput)
+				if err := json.NewDecoder(r.Body).Decode(input); err != nil {
+					t.Errorf("failed to decode request body: %+v", err)
+				}
+				for _, entry := range input.Entries {
+					carrier := &otelsqs.SQSSystemAttributesCarrier{Attributes: entry.MessageSystemAttributes}
+					sc := trace.SpanContextFromContext(propagator.Extract(context.Background(), carrier))
+					if traceID := sc.TraceID(); traceID.IsValid() {
+						traceIDs = append(traceIDs, sc.TraceID())
+					}
+				}
 				w.Header().Set("content-type", "application/json")
 				_ = json.NewEncoder(w).Encode(tc.output)
 			}))
@@ -280,7 +309,7 @@ func TestMiddleware_SendMessageBatch(t *testing.T) {
 			tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exporter))
 			var opts sqs.Options
 			opts.BaseEndpoint = &srv.URL
-			otelsqs.AppendMiddlewares(&opts.APIOptions, otelsqs.WithTracerProvider(tp))
+			otelsqs.AppendMiddlewares(&opts.APIOptions, otelsqs.WithTracerProvider(tp), otelsqs.WithPropagator(propagator))
 			client := sqs.New(opts)
 			ctx, span := tp.Tracer("test").Start(ctx, "SendMessageBatch")
 			_, err := client.SendMessageBatch(ctx, tc.input)
@@ -288,6 +317,9 @@ func TestMiddleware_SendMessageBatch(t *testing.T) {
 				t.Fatalf("SendMessage: %+v", err)
 			}
 			span.End()
+			if len(traceIDs) != len(tc.input.Entries) {
+				t.Errorf("the number of trace IDs in the message system attributes mismatch:\n\twant: %d\n\t got: %d", len(tc.input.Entries), len(traceIDs))
+			}
 			if err := tp.ForceFlush(ctx); err != nil {
 				t.Fatalf("ForceFlush: %+v", err)
 			}
