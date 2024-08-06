@@ -2,7 +2,7 @@ module github.com/aereal/otel-instrumentation/github.com/graph-gophers/dataloade
 
 go 1.21
 
-toolchain go1.22.5
+toolchain go1.22.6
 
 require (
 	github.com/graph-gophers/dataloader/v7 v7.1.0
