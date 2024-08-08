@@ -1,9 +1,8 @@
-go 1.21
-
-toolchain go1.22.0
+go 1.22.0
 
 use (
 	.
 	./awslambda
+	./github.com/aws/aws-sdk-go-v2/service/sqs/otelsqs
 	./github.com/graph-gophers/dataloader/oteldataloader
 )
