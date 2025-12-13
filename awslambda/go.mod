@@ -8,9 +8,9 @@ require (
 	github.com/aws/aws-lambda-go v1.47.0
 	github.com/google/go-cmp v0.6.0
 	go.opentelemetry.io/contrib/propagators/aws v1.28.0
-	go.opentelemetry.io/otel v1.28.0
-	go.opentelemetry.io/otel/sdk v1.28.0
-	go.opentelemetry.io/otel/trace v1.28.0
+	go.opentelemetry.io/otel v1.39.0
+	go.opentelemetry.io/otel/sdk v1.39.0
+	go.opentelemetry.io/otel/trace v1.39.0
 )
 
 require (
